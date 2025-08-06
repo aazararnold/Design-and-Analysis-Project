@@ -125,6 +125,61 @@ class TSPPerformanceTester:
         distance = TSPPerformanceTester.calculate_tour_distance(tour, cities)
         return tour, distance
     
+    @staticmethod
+    def simulated_annealing_tsp(cities):
+        """Simulated Annealing TSP solver"""
+        n = len(cities)
+        
+        # Generate initial random solution
+        current_solution = list(range(n))
+        random.shuffle(current_solution)
+        current_cost = TSPPerformanceTester.calculate_tour_distance(current_solution, cities)
+        
+        best_solution = current_solution[:]
+        best_cost = current_cost
+        
+        # SA parameters
+        initial_temp = 1000
+        cooling_rate = 0.995
+        min_temp = 1
+        max_iterations = 5000
+        
+        temperature = initial_temp
+        iteration = 0
+        
+        while temperature > min_temp and iteration < max_iterations:
+            # Generate neighbor by swapping two random cities
+            new_solution = current_solution[:]
+            i, j = random.sample(range(n), 2)
+            new_solution[i], new_solution[j] = new_solution[j], new_solution[i]
+            
+            new_cost = TSPPerformanceTester.calculate_tour_distance(new_solution, cities)
+            
+            # Calculate acceptance probability
+            if new_cost < current_cost:
+                # Always accept better solution
+                current_solution = new_solution
+                current_cost = new_cost
+                
+                # Update best solution if necessary
+                if new_cost < best_cost:
+                    best_solution = new_solution[:]
+                    best_cost = new_cost
+            else:
+                # Accept worse solution with probability
+                delta = new_cost - current_cost
+                probability = math.exp(-delta / temperature)
+                
+                if random.random() < probability:
+                    current_solution = new_solution
+                    current_cost = new_cost
+        
+        # Cool down
+        temperature *= cooling_rate
+        iteration += 1
+        
+        return best_solution, best_cost
+    
     def run_performance_test(self):
         """Run comprehensive performance test"""
         print("Running TSP Performance Analysis...")
@@ -138,7 +193,8 @@ class TSPPerformanceTester:
         results = {
             'brute_force': {'sizes': [], 'times': [], 'distances': []},
             'greedy': {'sizes': [], 'times': [], 'distances': []},
-            'mst': {'sizes': [], 'times': [], 'distances': []}
+            'mst': {'sizes': [], 'times': [], 'distances': []},
+            'simulated_annealing': {'sizes': [], 'times': [], 'distances': []}
         }
         
         for n in city_counts:
@@ -148,6 +204,7 @@ class TSPPerformanceTester:
             bf_times, bf_distances = [], []
             greedy_times, greedy_distances = [], []
             mst_times, mst_distances = [], []
+            sa_times, sa_distances = [], []
             
             for trial in range(num_trials):
                 cities = self.generate_cities(n)
@@ -175,6 +232,13 @@ class TSPPerformanceTester:
                 mst_times.append((end_time - start_time) * 1000)
                 mst_distances.append(distance)
             
+                # Test Simulated Annealing
+                start_time = time.time()
+                tour, distance = self.simulated_annealing_tsp(cities)
+                end_time = time.time()
+                sa_times.append((end_time - start_time) * 1000)
+                sa_distances.append(distance)
+            
             # Store average results
             if bf_times:
                 results['brute_force']['sizes'].append(n)
@@ -189,8 +253,13 @@ class TSPPerformanceTester:
             results['mst']['times'].append(np.mean(mst_times))
             results['mst']['distances'].append(np.mean(mst_distances))
             
+            results['simulated_annealing']['sizes'].append(n)
+            results['simulated_annealing']['times'].append(np.mean(sa_times))
+            results['simulated_annealing']['distances'].append(np.mean(sa_distances))
+
             print(f"  Greedy: {np.mean(greedy_times):.2f}ms, Distance: {np.mean(greedy_distances):.2f}")
             print(f"  MST: {np.mean(mst_times):.2f}ms, Distance: {np.mean(mst_distances):.2f}")
+            print(f"  Simulated Annealing: {np.mean(sa_times):.2f}ms, Distance: {np.mean(sa_distances):.2f}")
             if bf_times:
                 print(f"  Brute Force: {np.mean(bf_times):.2f}ms, Distance: {np.mean(bf_distances):.2f}")
         
@@ -213,6 +282,8 @@ class TSPPerformanceTester:
                 'g-s', label='Greedy O(n²)', linewidth=2, markersize=6)
         ax1.plot(results['mst']['sizes'], results['mst']['times'], 
                 'b-^', label='MST O(n²logn)', linewidth=2, markersize=6)
+        ax1.plot(results['simulated_annealing']['sizes'], results['simulated_annealing']['times'], 
+                'm-d', label='Simulated Annealing O(k×n)', linewidth=2, markersize=6)
         
         ax1.set_xlabel('Number of Cities')
         ax1.set_ylabel('Execution Time (ms)')
@@ -230,6 +301,8 @@ class TSPPerformanceTester:
                 'g-s', label='Greedy Heuristic', linewidth=2, markersize=6)
         ax2.plot(results['mst']['sizes'], results['mst']['distances'], 
                 'b-^', label='MST Approximation', linewidth=2, markersize=6)
+        ax2.plot(results['simulated_annealing']['sizes'], results['simulated_annealing']['distances'], 
+                'm-d', label='Simulated Annealing', linewidth=2, markersize=6)
         
         ax2.set_xlabel('Number of Cities')
         ax2.set_ylabel('Tour Distance')
@@ -263,6 +336,8 @@ class TSPPerformanceTester:
                    c='green', s=100, alpha=0.7, label='Greedy')
         ax4.scatter(results['mst']['times'], results['mst']['distances'], 
                    c='blue', s=100, alpha=0.7, label='MST')
+        ax4.scatter(results['simulated_annealing']['times'], results['simulated_annealing']['distances'], 
+                   c='magenta', s=100, alpha=0.7, label='Simulated Annealing')
         
         ax4.set_xlabel('Execution Time (ms)')
         ax4.set_ylabel('Tour Distance')

@@ -7,12 +7,14 @@ This project implements and compares different algorithms for solving TSP:
 2. Greedy Nearest Neighbor (heuristic)
 3. MST Approximation (approximation algorithm)
 4. Genetic Algorithm (metaheuristic)
+5. Simulated Annealing (metaheuristic)
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.animation as animation
 import numpy as np
 import random
 import itertools
@@ -68,22 +70,60 @@ class TSPSolver:
         
         return best_tour, min_distance, "Optimal solution found"
     
-    def greedy_nearest_neighbor(self, start_city=0):
-        """Greedy nearest neighbor heuristic"""
+    def greedy_nearest_neighbor_animated(self, start_city=0):
+        """Greedy nearest neighbor with step-by-step animation data"""
         n = len(self.cities)
         unvisited = set(range(n))
         tour = [start_city]
         unvisited.remove(start_city)
         current_city = start_city
         
+        # Store animation steps
+        animation_steps = []
+        animation_steps.append({
+            'current_city': current_city,
+            'tour': tour[:],
+            'unvisited': unvisited.copy(),
+            'message': f"Starting at city {start_city}"
+        })
+        
         while unvisited:
+            # Find nearest unvisited city
             nearest_city = min(unvisited, key=lambda city: self.distances[current_city][city])
+            nearest_distance = self.distances[current_city][nearest_city]
+            
             tour.append(nearest_city)
             unvisited.remove(nearest_city)
+            
+            animation_steps.append({
+                'current_city': current_city,
+                'next_city': nearest_city,
+                'tour': tour[:],
+                'unvisited': unvisited.copy(),
+                'distance': nearest_distance,
+                'message': f"From city {current_city} → nearest city {nearest_city} (distance: {nearest_distance:.2f})"
+            })
+            
             current_city = nearest_city
         
-        distance = self.calculate_tour_distance(tour)
-        return tour, distance, "Heuristic solution"
+        # Add final step - return to start
+        final_distance = self.distances[current_city][start_city]
+        animation_steps.append({
+            'current_city': current_city,
+            'next_city': start_city,
+            'tour': tour + [start_city],
+            'unvisited': set(),
+            'distance': final_distance,
+            'message': f"Return to start: city {current_city} → city {start_city} (distance: {final_distance:.2f})"
+        })
+        
+        total_distance = self.calculate_tour_distance(tour)
+        return tour, total_distance, "Heuristic solution", animation_steps
+    
+    def greedy_nearest_neighbor(self, start_city=0):
+        """Regular greedy nearest neighbor without animation"""
+        tour, distance, message, _ = self.greedy_nearest_neighbor_animated(start_city)
+        return tour, distance, message
     
     def mst_approximation(self):
         """MST-based 2-approximation algorithm"""
@@ -183,6 +223,54 @@ class TSPSolver:
         
         return best_tour, best_distance, f"Genetic algorithm solution (gen: {generations})"
     
+    def simulated_annealing(self, initial_temp=10000, cooling_rate=0.995, min_temp=1, max_iterations=10000):
+        """Simulated Annealing algorithm for TSP"""
+        n = len(self.cities)
+        
+        # Generate initial random solution
+        current_solution = list(range(n))
+        random.shuffle(current_solution)
+        current_cost = self.calculate_tour_distance(current_solution)
+        
+        best_solution = current_solution[:]
+        best_cost = current_cost
+        
+        temperature = initial_temp
+        iteration = 0
+        
+        while temperature > min_temp and iteration < max_iterations:
+            # Generate neighbor by swapping two random cities
+            new_solution = current_solution[:]
+            i, j = random.sample(range(n), 2)
+            new_solution[i], new_solution[j] = new_solution[j], new_solution[i]
+            
+            new_cost = self.calculate_tour_distance(new_solution)
+            
+            # Calculate acceptance probability
+            if new_cost < current_cost:
+                # Always accept better solution
+                current_solution = new_solution
+                current_cost = new_cost
+                
+                # Update best solution if necessary
+                if new_cost < best_cost:
+                    best_solution = new_solution[:]
+                    best_cost = new_cost
+            else:
+                # Accept worse solution with probability
+                delta = new_cost - current_cost
+                probability = math.exp(-delta / temperature)
+                
+                if random.random() < probability:
+                    current_solution = new_solution
+                    current_cost = new_cost
+            
+            # Cool down
+            temperature *= cooling_rate
+            iteration += 1
+        
+        return best_solution, best_cost, f"Simulated annealing solution (temp: {initial_temp}, iterations: {iteration})"
+    
     def tournament_selection(self, population, fitness_scores, tournament_size=3):
         """Tournament selection for genetic algorithm"""
         tournament_indices = random.sample(range(len(population)), tournament_size)
@@ -214,11 +302,14 @@ class TSPVisualizer:
     def __init__(self, root):
         self.root = root
         self.root.title("TSP Solver - NP-Hard Problem Analysis")
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x900")
         
         self.solver = TSPSolver()
         self.cities = []
         self.current_tour = []
+        self.animation_steps = []
+        self.current_step = 0
+        self.animation_running = False
         
         self.setup_gui()
         self.generate_random_cities(8)
@@ -257,11 +348,39 @@ class TSPVisualizer:
             ("Brute Force (≤10 cities)", self.run_brute_force),
             ("Greedy Nearest Neighbor", self.run_greedy),
             ("MST Approximation", self.run_mst),
-            ("Genetic Algorithm", self.run_genetic)
+            ("Genetic Algorithm", self.run_genetic),
+            ("Simulated Annealing", self.run_simulated_annealing)
         ]
         
         for name, command in algorithms:
             ttk.Button(algo_frame, text=name, command=command, width=25).pack(pady=2)
+        
+        # Animation controls
+        anim_frame = ttk.LabelFrame(control_frame, text="Path Simulation", padding=10)
+        anim_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(anim_frame, text="🎬 Animate Greedy Algorithm", 
+                  command=self.start_greedy_animation, width=25).pack(pady=2)
+        
+        self.animation_controls_frame = ttk.Frame(anim_frame)
+        self.animation_controls_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(self.animation_controls_frame, text="⏸️ Pause", 
+                  command=self.pause_animation, width=8).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self.animation_controls_frame, text="▶️ Resume", 
+                  command=self.resume_animation, width=8).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self.animation_controls_frame, text="⏹️ Stop", 
+                  command=self.stop_animation, width=8).pack(side=tk.LEFT, padx=2)
+        
+        # Animation speed control
+        speed_frame = ttk.Frame(anim_frame)
+        speed_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(speed_frame, text="Speed:").pack(side=tk.LEFT)
+        self.animation_speed = tk.DoubleVar(value=1.0)
+        speed_scale = ttk.Scale(speed_frame, from_=0.1, to=3.0, variable=self.animation_speed, 
+                               orient=tk.HORIZONTAL, length=150)
+        speed_scale.pack(side=tk.LEFT, padx=5)
+        ttk.Label(speed_frame, text="3x").pack(side=tk.LEFT)
         
         # Results display
         results_frame = ttk.LabelFrame(control_frame, text="Results", padding=10)
@@ -285,9 +404,13 @@ class TSPVisualizer:
         viz_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
         # Matplotlib figure
-        self.fig, self.ax = plt.subplots(figsize=(8, 6))
+        self.fig, self.ax = plt.subplots(figsize=(10, 8))
         self.canvas = FigureCanvasTkAgg(self.fig, viz_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Animation status
+        self.status_label = ttk.Label(viz_frame, text="Ready for simulation", font=("Arial", 12))
+        self.status_label.pack(pady=5)
     
     def generate_random_cities(self, n=None):
         """Generate random cities"""
@@ -302,6 +425,7 @@ class TSPVisualizer:
         
         self.solver.set_cities(self.cities)
         self.current_tour = []
+        self.stop_animation()
         self.update_visualization()
     
     def generate_random_cities_gui(self):
@@ -310,7 +434,7 @@ class TSPVisualizer:
         self.result_text.delete(1.0, tk.END)
         self.result_text.insert(tk.END, f"Generated {len(self.cities)} random cities\n")
     
-    def update_visualization(self):
+    def update_visualization(self, step_data=None):
         """Update the visualization"""
         self.ax.clear()
         
@@ -321,30 +445,161 @@ class TSPVisualizer:
         x_coords = [city[0] for city in self.cities]
         y_coords = [city[1] for city in self.cities]
         
-        self.ax.scatter(x_coords, y_coords, c='red', s=100, zorder=3)
+        # Color cities based on animation state
+        if step_data:
+            colors = []
+            sizes = []
+            for i in range(len(self.cities)):
+                if i == step_data.get('current_city'):
+                    colors.append('orange')  # Current city
+                    sizes.append(200)
+                elif i == step_data.get('next_city'):
+                    colors.append('lime')    # Next city to visit
+                    sizes.append(200)
+                elif i in step_data.get('unvisited', set()):
+                    colors.append('lightgray')  # Unvisited
+                    sizes.append(100)
+                else:
+                    colors.append('red')     # Visited
+                    sizes.append(150)
+        else:
+            colors = ['red' if i == 0 else 'lightblue' for i in range(len(self.cities))]
+            sizes = [150 if i == 0 else 100 for i in range(len(self.cities))]
+        
+        self.ax.scatter(x_coords, y_coords, c=colors, s=sizes, zorder=3, edgecolors='black', linewidth=1)
         
         # Label cities
         for i, (x, y) in enumerate(self.cities):
-            self.ax.annotate(str(i), (x, y), xytext=(5, 5), textcoords='offset points')
+            self.ax.annotate(str(i), (x, y), xytext=(0, 0), textcoords='offset points', 
+                           ha='center', va='center', fontweight='bold', fontsize=10)
         
         # Plot tour if available
-        if self.current_tour:
+        if step_data and 'tour' in step_data and len(step_data['tour']) > 1:
+            tour = step_data['tour']
+            # Plot completed path
+            for i in range(len(tour) - 1):
+                city1 = self.cities[tour[i]]
+                city2 = self.cities[tour[i + 1]]
+                self.ax.plot([city1[0], city2[0]], [city1[1], city2[1]], 'b-', linewidth=3, alpha=0.7)
+            
+            # Highlight current edge being considered
+            if 'next_city' in step_data:
+                current = self.cities[step_data['current_city']]
+                next_city = self.cities[step_data['next_city']]
+                self.ax.plot([current[0], next_city[0]], [current[1], next_city[1]], 
+                           'r--', linewidth=4, alpha=0.8, label='Current edge')
+        
+        elif self.current_tour:
+            # Static tour display
             tour_x = [self.cities[i][0] for i in self.current_tour] + [self.cities[self.current_tour[0]][0]]
             tour_y = [self.cities[i][1] for i in self.current_tour] + [self.cities[self.current_tour[0]][1]]
             self.ax.plot(tour_x, tour_y, 'b-', linewidth=2, alpha=0.7)
         
         self.ax.set_xlim(0, 100)
         self.ax.set_ylim(0, 100)
-        self.ax.set_title("Traveling Salesman Problem")
+        self.ax.set_title("Traveling Salesman Problem - Path Simulation", fontsize=14, fontweight='bold')
         self.ax.grid(True, alpha=0.3)
         
+        # Add legend for animation
+        if step_data:
+            legend_elements = [
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='orange', markersize=10, label='Current City'),
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lime', markersize=10, label='Next City'),
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Visited'),
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lightgray', markersize=10, label='Unvisited'),
+                plt.Line2D([0], [0], color='blue', linewidth=3, label='Completed Path'),
+                plt.Line2D([0], [0], color='red', linestyle='--', linewidth=3, label='Current Edge')
+            ]
+            self.ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1, 1))
+        
         self.canvas.draw()
+    
+    def start_greedy_animation(self):
+        """Start animated greedy algorithm"""
+        if not self.cities:
+            messagebox.showwarning("Warning", "Please generate cities first!")
+            return
+        
+        if self.animation_running:
+            self.stop_animation()
+        
+        # Get animation steps
+        _, _, _, self.animation_steps = self.solver.greedy_nearest_neighbor_animated()
+        self.current_step = 0
+        self.animation_running = True
+        
+        self.result_text.insert(tk.END, "\n🎬 Starting Greedy Algorithm Animation...\n")
+        self.result_text.insert(tk.END, f"Total steps: {len(self.animation_steps)}\n")
+        self.result_text.see(tk.END)
+        
+        self.animate_step()
+    
+    def animate_step(self):
+        """Animate one step of the algorithm"""
+        if not self.animation_running or self.current_step >= len(self.animation_steps):
+            if self.current_step >= len(self.animation_steps):
+                self.animation_complete()
+            return
+        
+        step_data = self.animation_steps[self.current_step]
+        self.update_visualization(step_data)
+        
+        # Update status
+        message = step_data.get('message', f"Step {self.current_step + 1}")
+        self.status_label.config(text=f"Step {self.current_step + 1}/{len(self.animation_steps)}: {message}")
+        
+        # Show distance if available
+        if 'distance' in step_data:
+            self.result_text.insert(tk.END, f"Step {self.current_step + 1}: {message}\n")
+            self.result_text.see(tk.END)
+        
+        self.current_step += 1
+        
+        # Schedule next step
+        delay = int(1000 / self.animation_speed.get())  # Convert speed to delay
+        self.root.after(delay, self.animate_step)
+    
+    def animation_complete(self):
+        """Handle animation completion"""
+        self.animation_running = False
+        total_distance = self.solver.calculate_tour_distance(self.animation_steps[-1]['tour'][:-1])  # Remove duplicate start city
+        
+        self.status_label.config(text=f"✅ Animation Complete! Total Distance: {total_distance:.2f}")
+        self.result_text.insert(tk.END, f"\n✅ Greedy Algorithm Complete!\n")
+        self.result_text.insert(tk.END, f"Final tour distance: {total_distance:.2f}\n")
+        self.result_text.insert(tk.END, "-" * 40 + "\n")
+        self.result_text.see(tk.END)
+        
+        # Store final tour for static display
+        self.current_tour = self.animation_steps[-1]['tour'][:-1]  # Remove duplicate start city
+    
+    def pause_animation(self):
+        """Pause the animation"""
+        self.animation_running = False
+        self.status_label.config(text="⏸️ Animation Paused")
+    
+    def resume_animation(self):
+        """Resume the animation"""
+        if self.animation_steps and self.current_step < len(self.animation_steps):
+            self.animation_running = True
+            self.status_label.config(text="▶️ Animation Resumed")
+            self.animate_step()
+    
+    def stop_animation(self):
+        """Stop the animation"""
+        self.animation_running = False
+        self.animation_steps = []
+        self.current_step = 0
+        self.status_label.config(text="⏹️ Animation Stopped")
+        self.update_visualization()
     
     def run_algorithm(self, algorithm_func, algorithm_name):
         """Run an algorithm and display results"""
         if not self.cities:
             messagebox.showwarning("Warning", "Please generate cities first!")
             return
+        
+        self.stop_animation()  # Stop any running animation
         
         self.result_text.insert(tk.END, f"\nRunning {algorithm_name}...\n")
         self.root.update()
@@ -393,6 +648,10 @@ class TSPVisualizer:
         """Run genetic algorithm"""
         self.run_algorithm(lambda: self.solver.genetic_algorithm(generations=50), "Genetic Algorithm")
     
+    def run_simulated_annealing(self):
+        """Run simulated annealing algorithm"""
+        self.run_algorithm(lambda: self.solver.simulated_annealing(initial_temp=1000, max_iterations=5000), "Simulated Annealing")
+    
     def run_performance_analysis(self):
         """Run performance analysis and show results"""
         analysis_window = tk.Toplevel(self.root)
@@ -408,7 +667,8 @@ class TSPVisualizer:
         city_sizes = [4, 5, 6, 7, 8, 10, 12, 15]
         algorithms = {
             'Greedy': self.solver.greedy_nearest_neighbor,
-            'MST': self.solver.mst_approximation
+            'MST': self.solver.mst_approximation,
+            'Simulated Annealing': lambda: self.solver.simulated_annealing(initial_temp=1000, max_iterations=1000)
         }
         
         results = {name: {'sizes': [], 'times': [], 'distances': []} for name in algorithms}
@@ -488,7 +748,8 @@ class TSPVisualizer:
             ['Brute Force', 'O(n!)', 'O(n)', 'Optimal'],
             ['Greedy NN', 'O(n²)', 'O(n)', 'Heuristic'],
             ['MST Approx', 'O(n² log n)', 'O(n²)', '≤ 2 × Optimal'],
-            ['Genetic Alg', 'O(g × p × n)', 'O(p × n)', 'Heuristic']
+            ['Genetic Alg', 'O(g × p × n)', 'O(p × n)', 'Heuristic'],
+            ['Simulated Annealing', 'O(k × n)', 'O(n)', 'Heuristic']
         ]
         
         table = ax4.table(cellText=table_data[1:], colLabels=table_data[0], 
@@ -503,7 +764,6 @@ class TSPVisualizer:
 
 def main():
     """Main function to run the TSP application"""
-    print("Launching GUI...")
     root = tk.Tk()
     app = TSPVisualizer(root)
     
@@ -519,11 +779,18 @@ Algorithms implemented:
 2. Greedy Nearest Neighbor - O(n²) - Fast heuristic
 3. MST Approximation - O(n² log n) - 2-approximation
 4. Genetic Algorithm - Metaheuristic approach
+5. Simulated Annealing - Metaheuristic approach
+
+🎬 NEW: Path Simulation Feature!
+- Click "Animate Greedy Algorithm" to see step-by-step path building
+- Control animation speed and playback
+- Visual legend shows current city, next city, and path progress
 
 Instructions:
 1. Generate random cities or adjust the number
 2. Run different algorithms to compare results
-3. Use Performance Analysis to see complexity differences
+3. Use "Animate Greedy Algorithm" for step-by-step visualization
+4. Use Performance Analysis to see complexity differences
 
 Note: Brute force is limited to ≤10 cities due to factorial complexity.
 """

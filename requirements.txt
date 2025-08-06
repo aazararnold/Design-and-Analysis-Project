@@ -1,0 +1,5 @@
+# Requirements for Real-World TSP Solver with Google Maps
+tkinter  # Usually included with Python
+matplotlib>=3.5.0
+numpy>=1.21.0
+requests>=2.25.0
